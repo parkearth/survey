@@ -421,3 +421,6 @@ dialog input {
   flex-shrink:0
 }
 
+[hidden] {display:none!important}
+.nativeLink {display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px solid #52674f;border-radius:12px;color:inherit;text-decoration:none;cursor:pointer}
+.nativeLink.gold {color:#0a1813}

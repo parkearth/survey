@@ -1,7 +1,22 @@
 import { id, templates, template, normalizeRoom, straighten, rotate, snap, turn, pt } from './model.js';
 export function scan(host, n, done, cancel, notice) {
   const bridge = window.webkit?.messageHandlers?.roomPlanBridge;
-  host.innerHTML = '<div class="row spread"><button id="back">✕　取消返回</button><span class="status">● 正在掃描新物件 ' + n + 'F</span></div><h1>空間掃描</h1><aside>剛開始請掃一下樓梯起步處或電梯門，完成後系統將自動水平轉正並與上下層對齊。</aside><div class="hud"><video playsinline muted autoplay></video><canvas></canvas><div class="reticle"></div><strong id="hint"></strong></div><div class="row"><b id="source"></b><select id="sample">' + templates.map((s, i) => '<option value="' + i + '">' + s + '</option>').join('') + '</select></div><p id="scanInfo"></p><button id="finish" class="gold wide">✓　完成本層掃描並自動對齊</button>';
+  host.innerHTML = `<div class="row spread"><button id="back">✕　取消返回</button><span class="status" id="status"></span></div>
+    <h1>空間掃描 · ${n}F</h1>
+    <aside>光達實測請掃過樓梯起步處或電梯門，再沿牆面緩慢移動。</aside>
+    <p id="scanInfo" role="status"></p>
+    <div class="row wrap" id="routes">
+      <a id="launch" class="gold nativeLink" href="surveybridge-scan://capture?floor=${n}">開啟 iPhone 原生光達 App</a>
+      <button id="retry">重試原生光達</button>
+      <label class="nativeLink" for="captureFile">匯入原生實測檔</label>
+      <input id="captureFile" type="file" accept=".json,application/json" hidden>
+      <button id="simulate">使用相機模擬</button>
+    </div>
+    <div id="demo" hidden>
+      <div class="hud"><video playsinline muted autoplay></video><canvas></canvas><div class="reticle"></div><strong id="hint"></strong></div>
+      <div class="row"><b>模擬範本</b><select id="sample">${templates.map((s,i)=>`<option value="${i}">${s}</option>`).join('')}</select></div>
+      <button id="finish" class="gold wide">載入本層模擬範本</button>
+    </div>`;
   const q = s => host.querySelector(s),
     c = q('canvas'),
     g = c.getContext('2d'),
@@ -11,33 +26,42 @@ export function scan(host, n, done, cancel, notice) {
     raf,
     move = 0,
     start = performance.now(),
-    native = !!bridge;
-  const token = id();
+    native = false, token, watchdog;
+
   const motion = () => move = Math.min(100, move + 1);
   host.onpointermove = motion;
   window.addEventListener('deviceorientation', motion);
   function cleanup() {
     alive = false;
+    clearTimeout(watchdog);
     cancelAnimationFrame(raf);
     stream?.getTracks().forEach(t => t.stop());
     video.srcObject = null;
     host.onpointermove = null;
     window.removeEventListener('deviceorientation', motion);
-    window.removeEventListener('pagehide', cleanup);
+    window.removeEventListener('pagehide', leaving);
     window.onNativeRoomPlanResult = undefined;
   }
-  window.addEventListener('pagehide', cleanup);
+  function leaving(e) {
+    if (!e.persisted) cleanup();
+    else if (stream) { stream.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+  }
+  window.addEventListener('pagehide', leaving);
   function finish(f) {
     straighten(f);
-    f.scannedAt = new Date().toISOString();
+    f.scannedAt ||= new Date().toISOString();
     cleanup();
     done(f);
   }
   async function web() {
+    if (!alive || !q('#demo').hidden) return;
     native = false;
+    q('#routes').hidden=true;
+    q('#demo').hidden=false;
+    q('#status').textContent='● 相機模擬';
+    raf=requestAnimationFrame(frame);
     q('#sample').hidden = false;
     q('#finish').disabled = false;
-    q('#source').textContent = 'Web 相機模擬';
     q('#scanInfo').textContent = '模型採用所選尺寸範本，相機影像僅供掃描引導。';
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -99,58 +123,89 @@ export function scan(host, n, done, cancel, notice) {
     q('#hint').textContent = ['Move device to start', 'Point camera at bottom edge of wall', 'Scanning walls and cabinets...'][Math.min(2, Math.floor(progress * 3))];
     raf = requestAnimationFrame(frame);
   }
-  raf = requestAnimationFrame(frame);
   q('#back').onclick = () => {
-    if (native) bridge.postMessage({
-      action: 'cancelScan',
-      token
-    });
+    if (native) bridge.postMessage({action:'cancelScan', token});
     cleanup();
     cancel();
   };
   q('#finish').onclick = () => {
+    if (!alive || q('#demo').hidden) return;
     const f = template(Number(q('#sample').value), n);
     rotate(f, 13);
     finish(f);
   };
-  if (native) {
-    q('#source').textContent = '原生 LiDAR';
-    q('#sample').hidden = true;
-    q('#finish').disabled = true;
-    q('#scanInfo').textContent = '請在原生掃描畫面按「完成掃描」。';
-    window.onNativeRoomPlanResult = result => {
-      if (typeof result === "string") {
-        try {
-          result = JSON.parse(result);
-        } catch {
-          notice("原生掃描回傳格式錯誤");
-          web();
+  function choices(message) {
+    clearTimeout(watchdog);
+    native = false;
+    token = null;
+    q('#routes').hidden=false;
+    q('#launch').hidden=!!bridge;
+    q('#retry').hidden=!bridge;
+    q('#status').textContent='待選擇來源';
+    q('#scanInfo').textContent=message;
+  }
+  function ingest(result, imported) {
+    if (!result || typeof result !== 'object') throw Error('實測資料格式錯誤。');
+    const raw=result.room || result;
+    // Files are decoded from the captured surfaces. Never trust arbitrary floorData from a picked file.
+    const f=(!imported && result.floorData) || normalizeRoom(raw,n);
+    if (imported && !raw.walls?.every(w=>w.dimensions?.[0]>0 && w.dimensions?.[1]>0)) throw Error('牆面尺寸無效。');
+    if (!Array.isArray(f.walls) || !f.walls.length || f.walls.some(w=>![w.start?.x,w.start?.y,w.end?.x,w.end?.y].every(Number.isFinite))) throw Error('掃描沒有可用的實測牆面。');
+    for(const o of f.openings) snap(o,f);
+    const anchor=f.openings.find(o=>o.id===f.anchorId);
+    if(anchor) f.anchorPoint=anchor.type==='stairs'?turn(pt(anchor.x,anchor.y+anchor.depth/2),anchor.rotation,anchor):pt(anchor.x,anchor.y);
+    const meta=result.captureInfo;
+    f.source=imported?'RoomPlan 匯入':'RoomPlan';
+    if (meta && Number.isInteger(meta.depthSamples) && meta.depthSamples>0) {
+      f.captureInfo={depthSamples:meta.depthSamples,wallCount:f.walls.length};
+      f.source+=' · 深度取樣 '+meta.depthSamples+' 幀';
+    }
+    if (meta?.capturedAt && Number.isFinite(Date.parse(meta.capturedAt))) f.scannedAt=new Date(meta.capturedAt).toISOString();
+    finish(f);
+  }
+  function beginNative() {
+    if(!alive || !bridge || native) return;
+    native=true;
+    token=id();
+    q('#routes').hidden=true;
+    q('#status').textContent='正在連接原生 App';
+    q('#scanInfo').textContent='正在等候 RoomPlan 回應。';
+    watchdog=setTimeout(()=>{
+      if(!alive || !native) return;
+      try { bridge.postMessage({action:'cancelScan',token}); } catch {}
+      choices('原生橋接未回應。請安裝 v1.1 原生 App 後重試。');
+    },10000);
+    window.onNativeRoomPlanResult=value=>{
+      if(!alive || !native) return;
+      try {
+        const result=typeof value==='string'?JSON.parse(value):value;
+        if(result?.token && result.token!==token) return;
+        clearTimeout(watchdog);
+        if(result?.state==='accepted'){
+          q('#status').textContent='原生 RoomPlan 已連線';
+          q('#scanInfo').textContent='請在原生畫面確認有效深度取樣幀數。';
           return;
         }
-      }
-      if (!alive || result.token && result.token !== token) return;
-      if (result.cancelled) {
-        cleanup();
-        cancel();
-        return;
-      }
-      try {
-        if (result.error) throw Error(result.error);
-        const f = result.floorData || normalizeRoom(result.room || result, n);
-        if (!f.walls.length) throw Error('掃描未取得牆面');
-        for (const o of f.openings) snap(o, f);
-        const a = f.openings.find(o => o.id === f.anchorId);
-        if (a) f.anchorPoint = a.type === 'stairs' ? turn(pt(a.x, a.y + a.depth / 2), a.rotation, a) : pt(a.x, a.y);
-        finish(f);
-      } catch (e) {
-        notice(e.message);
-        web();
-      }
+        if(result?.cancelled){cleanup();cancel();return}
+        if(result?.error) throw Error(result.error);
+        ingest(result,false);
+      } catch(e) {choices(e.message);}
     };
-    bridge.postMessage({
-      action: 'startScan',
-      floor: n,
-      token
-    });
-  } else web();
+    try { bridge.postMessage({action:'startScan',floor:n,token}); }
+    catch(e) {choices('無法開啟原生掃描：'+e.message);}
+  }
+  q('#simulate').onclick=web;
+  q('#retry').onclick=beginNative;
+  q('#launch').onclick=()=>{q('#scanInfo').textContent='請使用已安裝的 v1.1 原生 App 實測。完成後回此頁匯入 JSON；若未開啟 App，請先安裝 Xcode 專案或機關簽署版本。';};
+  q('#captureFile').onchange=async e=>{
+    const file=e.target.files[0];
+    if(!file) return;
+    try {
+      const result=JSON.parse(await file.text());
+      if(alive) ingest(result,true);
+    } catch(err) {if(alive) choices('匯入失敗：'+err.message);}
+    e.target.value='';
+  };
+  if(bridge) beginNative();
+  else choices('目前為網頁模式。在 iPhone 15 Pro 實測，請開啟已安裝的原生 App。完成後可將實測檔匯回本層。');
 }
