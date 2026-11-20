@@ -1,6 +1,6 @@
 const root = new URL('./', self.location.href);
-const cacheName = 'surveybridge-v2:' + root.pathname;
-const shell = ['./', './index.html', './manifest.webmanifest', './style.css', './icon192.png', './icon512.png', ...['app', 'catalog', 'manual', 'cover', 'drawing', 'exports', 'geometry3d', 'interact', 'model', 'portable', 'scan', 'scene'].map(n => './js/' + n + '.js')];
+const cacheName = 'surveybridge-v21:' + root.pathname;
+const shell = ['./', './index.html', './manifest.webmanifest', './style.css', './icon192.png', './icon512.png', ...['app', 'catalog', 'floors', 'manual', 'cover', 'drawing', 'exports', 'geometry3d', 'interact', 'model', 'portable', 'scan', 'scene'].map(n => './js/' + n + '.js')];
 const localPaths = new Set(shell.map(path => new URL(path,root).pathname));
 self.addEventListener('install', event => event.waitUntil(caches.open(cacheName).then(c => c.addAll(shell)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil((async()=>{for(const key of await caches.keys())if(key!==cacheName && /^surveybridge-v[0-9]+:/.test(key) && key.endsWith(':'+root.pathname))await caches.delete(key);await self.clients.claim()})()));

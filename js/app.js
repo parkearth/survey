@@ -1,3 +1,4 @@
+import { floorMaterials, isFloorHole, floorMetrics } from './floors.js';
 import { id, pt, copy, StorageManager, area, ping, rotate, straighten, snap, angle, turn, distance, bounds, reshapeAnnex, annexes } from './model.js';
 import { catalog, groups, constructionTypes, objectGroup } from './catalog.js';
 import { createFloor, addObject, upgrade, arrangements, applyArrangement, duplicateFloor } from './manual.js';
@@ -21,7 +22,7 @@ let project,
   stack = 'stack',
   furn3 = true;
 let state,
-  category = 'structure',
+  category = 'flooring',
   toastTimer;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;',
@@ -156,7 +157,7 @@ function home() {
   app.className = 'home';
   $('#brand').textContent = brand;
   const all = db.list();
-  app.innerHTML = `<header class="mast"><span class="mark">⌑</span><div><small>SURVEYBRIDGE · v2.0</small><strong>${esc(brand.split('｜')[0])}</strong></div>${button('brand', '品牌設定', 'quiet')}</header>
+  app.innerHTML = `<header class="mast"><span class="mark">⌑</span><div><small>SURVEYBRIDGE · v2.1</small><strong>${esc(brand.split('｜')[0])}</strong></div>${button('brand', '品牌設定', 'quiet')}</header>
     <section class="intro"><div><span class="eyebrow">空間建模工作站</span><h1>從尺寸開始，<br>建立建物全貌。</h1><p>記錄樓層與構造，完成可編輯的平面與立體模型。</p></div><div class="plate"><canvas id="cover" aria-label="多樓層建築示意"></canvas></div></section>
     <div class="entryGrid">
       ${button('manual', '<span class="entryIcon">⌑</span><span><strong>手動數據建模</strong><small>輸入尺寸 · 選擇構造 · 加入物件</small></span><span class="entryArrow">↗</span>', 'entry primary')}
@@ -201,6 +202,8 @@ function validateProject(data) {
     if (f.components !== undefined && !Array.isArray(f.components)) throw Error('構造物件格式錯誤。');
     for (const w of f.walls) if (![w.start?.x, w.start?.y, w.end?.x, w.end?.y, w.thickness].every(Number.isFinite) || w.thickness <= 0) throw Error('牆體尺寸無效。');
     for (const o of [...f.openings, ...f.furnitures, ...(f.components || [])]) if (![o.x, o.y, o.width, o.depth, o.height, o.rotation].every(Number.isFinite) || Math.min(o.width, o.depth, o.height) <= 0) throw Error('物件尺寸無效。');
+    if (f.slabThickness !== undefined && (!Number.isFinite(f.slabThickness) || f.slabThickness <= 0 || f.slabThickness > 100)) throw Error('樓板厚度無效。');
+    if (!floorMaterials[f.floorMaterial]) f.floorMaterial = 'wood';
     f.label = String(f.label || labelFor(f.floorIndex));
     f.usage = String(f.usage || '未分類');
   }
@@ -233,7 +236,7 @@ function manualPage(isNew) {
       ${isNew ? field('name', '專案名稱', newProject().name) : ''}
       ${isNew ? number('count', '建立樓層數', 1, 1, 30) : number('floorIndex', '樓層編號（地下層用負數）', nextIndex(), -20, 100)}
       ${field('usage', '樓層用途', initial?.usage || '住宅')}
-      ${select('construction', '構造類別', constructionTypes, structure)}
+      ${select('construction', '構造類別', constructionTypes, structure)}${select('floorMaterial', '地板材質', floorMaterials, initial?.floorMaterial || 'wood')}
     </div><p class="hint">${isNew ? '多層建物會先套用相同外框，進入工作台後可分層修改。' : '新增後依樓層編號排序，例如 B1、1F、2F。'}</p></section>
     <section class="formCard"><h2>外框數據</h2><div class="formGrid">
       ${select('shape', '平面形狀', {
@@ -327,18 +330,22 @@ function syncAnchor(f) {
   if (o) f.anchorPoint = ['stairs', 'elevator'].includes(o.type) ? turn(pt(o.x, o.y + o.depth / 2), o.rotation, o) : pt(o.x, o.y);
 }
 function catalogHTML() {
-  return `<section class="catalog"><div class="sectionHead"><h2>加入建模物件</h2><small>${Object.keys(catalog).length} 種物件</small></div><div class="categories">${Object.entries(groups).map(([key, label]) => button('category-' + key, label, category === key ? 'active' : '')).join('')}</div><div class="objectGrid">${Object.values(catalog).filter(c => c.group === category).map(c => button('add-' + c.key, `<span class="objectSymbol symbol-${c.kind}"></span><span>${c.label}</span><small>${c.width} × ${c.depth} cm</small>`, 'objectTile')).join('')}</div></section>`;
+  return `<section class="catalog"><div class="sectionHead"><h2>加入建模物件</h2><small>42 種物件 · 6 種材質</small></div><div class="categories">${Object.entries(groups).map(([key, label]) => button('category-' + key, label, category === key ? 'active' : '')).join('')}</div><div class="objectGrid">${Object.values(catalog).filter(c => c.group === category).map(c => button('add-' + c.key, `<span class="objectSymbol symbol-${c.kind}"></span><span>${c.label}</span><small>${c.kind === 'finish' ? '套用至目前樓層' : c.width + ' × ' + c.depth + ' cm'}</small>`, 'objectTile')).join('')}</div></section>`;
 }
 async function add(key) {
   const f = floor(),
     spec = catalog[key],
     center = view?.center?.() || pt(200, 200);
+  if (spec.kind === 'finish') {
+    if (await modal('套用' + spec.label, '<p>將目前樓層的自動地坪改為' + spec.label + '。樓板開口會保留；可復原。</p>')) edit(() => f.floorMaterial = spec.material);
+    return;
+  }
   let height = spec.height,
     elevation = 0;
   if (['column', 'pipe_shaft', 'stairs', 'stairs_u', 'structural', 'partition', 'arcade'].includes(key)) height = f.ceilingHeight;
   if (key === 'beam') elevation = Math.max(0, f.ceilingHeight - height);
   if (['roof', 'canopy'].includes(key)) elevation = f.ceilingHeight;
-  const v = await modal('新增' + spec.label, `<div class="formGrid">${number('width', '寬／長（cm）', spec.width)}${number('depth', '深／厚（cm）', spec.depth)}${number('height', '高度（cm）', height)}${number('x', '中心 X（cm）', Math.round(center.x), -50000)}${number('y', '中心 Y（cm）', Math.round(center.y), -50000)}${number('rotation', '旋轉角度', 0, -180, 180)}${['wall', 'region'].includes(spec.kind) ? '' : number('elevation', '底部離地高（cm）', elevation, 0)}</div><p class="hint">門窗會貼齊最近可容納的牆段。新增後可拖曳或修改座標。</p>`);
+  const v = await modal('新增' + spec.label, `<div class="formGrid">${number('width', '寬／長（cm）', spec.width)}${number('depth', '深／厚（cm）', spec.depth)}${spec.kind === 'hole' ? '<input type="hidden" name="height" value="15">' : number('height', '高度（cm）', height)}${number('x', '中心 X（cm）', Math.round(center.x), -50000)}${number('y', '中心 Y（cm）', Math.round(center.y), -50000)}${number('rotation', '旋轉角度', 0, -180, 180)}${['wall', 'region', 'hole'].includes(spec.kind) ? '' : number('elevation', '底部離地高（cm）', elevation, 0)}</div><p class="hint">${spec.kind === 'hole' ? '開口切穿本層自動地坪與樓板物件；樓梯開口通常設在樓梯抵達的上一層。可在 3D 單層模式檢查。' : '門窗會貼齊最近可容納的牆段。新增後可拖曳或修改座標。'}</p>`);
   if (v) {
     edit(() => addObject(f, key, v));
     toast('已加入' + spec.label);
@@ -369,7 +376,7 @@ async function properties() {
     });
     return;
   }
-  const v = await modal('物件數據', `<div class="formGrid">${field('label', '物件名稱', o.label)}${number('width', '寬度（cm）', o.width)}${number('depth', '深度（cm）', o.depth)}${number('height', '高度（cm）', o.height || f.ceilingHeight)}${number('x', '中心 X（cm）', o.x, -50000)}${number('y', '中心 Y（cm）', o.y, -50000)}${number('rotation', '旋轉角度', o.rotation, -180, 180)}${o.regionId ? '' : number('elevation', '底部離地高（cm）', o.elevation || 0, 0)}${o.type?.includes('window') ? number('sillHeight', '窗台離地高（cm）', o.sillHeight || 0, 0) : ''}</div>`);
+  const v = await modal('物件數據', `<div class="formGrid">${field('label', '物件名稱', o.label)}${number('width', '寬度（cm）', o.width)}${number('depth', '深度（cm）', o.depth)}${isFloorHole(o) ? '' : number('height', '高度（cm）', o.height || f.ceilingHeight)}${number('x', '中心 X（cm）', o.x, -50000)}${number('y', '中心 Y（cm）', o.y, -50000)}${number('rotation', '旋轉角度', o.rotation, -180, 180)}${o.regionId || isFloorHole(o) ? '' : number('elevation', '底部離地高（cm）', o.elevation || 0, 0)}${o.type?.includes('window') ? number('sillHeight', '窗台離地高（cm）', o.sillHeight || 0, 0) : ''}</div>`);
   if (v) edit(() => {
     for (const [key, value] of Object.entries(v)) o[key] = key === 'label' ? value : +value;
     if (o.regionId) reshapeAnnex(f, o);else snap(o, f);
@@ -386,11 +393,13 @@ function objectsHTML(f) {
 }
 async function floorSettings() {
   const f = floor();
-  const v = await modal('樓層與構造', `<div class="formGrid">${field('label', '樓層標籤', f.label)}${field('usage', '用途', f.usage)}${select('construction', '構造類別', constructionTypes, f.construction)}${number('height', '樓高（cm）', f.ceilingHeight, 100, 2000)}${number('thickness', '外牆厚度（cm）', f.wallThickness, 4, 100)}</div><p class="hint">外牆與柱的個別高度可在物件數據中調整。</p>`);
+  const v = await modal('樓層與構造', `<div class="formGrid">${field('label', '樓層標籤', f.label)}${field('usage', '用途', f.usage)}${select('construction', '構造類別', constructionTypes, f.construction)}${number('height', '樓高（cm）', f.ceilingHeight, 100, 2000)}${number('thickness', '外牆厚度（cm）', f.wallThickness, 4, 100)}${select('floorMaterial', '地板材質', floorMaterials, f.floorMaterial)}${number('slabThickness', '自動樓板厚度（cm）', f.slabThickness, 1, 100)}</div><p class="hint">外牆與柱的個別高度可在物件數據中調整。</p>`);
   if (v) edit(() => {
     f.label = v.label;
     f.usage = v.usage;
     f.construction = v.construction;
+    f.floorMaterial = v.floorMaterial;
+    f.slabThickness = +v.slabThickness;
     f.ceilingHeight = +v.height;
     f.wallThickness = +v.thickness;
     f.walls.filter(w => w.type === 'structural').forEach(w => w.thickness = +v.thickness);
@@ -404,8 +413,8 @@ async function work() {
     f = floor();
   app.innerHTML = `<header class="workHeader">${button('home', '‹ 紀錄庫', 'quiet')}<div><small>建物工作台</small>${button('rename', esc(project.name) + ' ✎', 'titleBtn')}</div><details class="exportMenu"><summary>匯出 ↗</summary><div>${button('png', '平面 PNG')}${button('pdf', '全棟 PDF')}${button('dxf', '本層 DXF')}${button('backup', '專案 JSON')}</div></details></header>
     <section class="floorBar"><div class="floorTabs">${project.floors.map((f, i) => button('floor-' + i, esc(f.label), i === idx ? 'active' : '')).join('')}</div><div class="row">${button('newFloor', '＋ 樓層')}${button('copy', '複製', 'quiet')}</div></section>
-    <div class="floorInfo"><div><b>${esc(f.usage)}</b><span>${esc(constructionTypes[f.construction]?.label || f.construction)} · 樓高 ${f.ceilingHeight} cm</span></div>${button('settings', '設定 ✎', 'quiet')}</div>
-    <div class="workGrid"><section class="drawingPanel"><nav class="viewTabs">${button('plan', '2D 平面圖', mode === 'plan' ? 'active' : '')}${button('three', '3D 立體圖', mode === 'three' ? 'active' : '')}</nav><div id="tools"></div><div id="stage"></div><div class="canvasCaption"><span>${esc(f.source)} · ${area(f).toFixed(2)} m² / ${ping(area(f))} 坪</span><span>20 cm 格線</span></div><div id="viewBottom"></div></section>
+    <div class="floorInfo"><div><b>${esc(f.usage)}</b><span>${esc(constructionTypes[f.construction]?.label || f.construction)} · ${esc(floorMaterials[f.floorMaterial]?.label || '木地板')} · 樓高 ${f.ceilingHeight} cm</span></div>${button('settings', '設定 ✎', 'quiet')}</div>
+    <div class="workGrid"><section class="drawingPanel"><nav class="viewTabs">${button('plan', '2D 平面圖', mode === 'plan' ? 'active' : '')}${button('three', '3D 立體圖', mode === 'three' ? 'active' : '')}</nav><div id="tools"></div><div id="stage"></div><div class="canvasCaption"><span>${esc(f.source)} · ${area(f).toFixed(2)} m² / ${ping(area(f))} 坪</span><span>開口 ${floorMetrics(f).hole.toFixed(2)} m² · 淨地坪 ${floorMetrics(f).net.toFixed(2)} m²</span></div><div id="viewBottom"></div></section>
     <aside class="sidePanel"><section id="selection" class="selection"></section><div id="catalogHost">${catalogHTML()}</div><section class="formCard compact"><h2>套用常用配置</h2><div class="row wrap">${Object.entries(arrangements).map(([key, v]) => button('preset-' + key, v.label)).join('')}</div><p class="hint">以起始尺寸加入本層，套用後請調整位置。</p></section>${objectsHTML(f)}<div class="row wrap">${button('lidar', '光達新增樓層', 'quiet')}${button('deleteFloor', '刪除本層', 'quiet')}</div></aside></div>`;
   const actions = {
     home,
@@ -434,7 +443,7 @@ async function work() {
     pdf: () => report(project, brand),
     dxf: () => saveFile(new DXFGenerator().generate(f), project.name + '-' + f.label + '.dxf', 'application/dxf'),
     backup: () => saveFile(JSON.stringify({
-      format: 'SurveyBridge.Project.2',
+      format: 'SurveyBridge.Project.2.1',
       project
     }, null, 2), project.name + '.json', 'application/json'),
     undo: () => history(true),
@@ -540,6 +549,7 @@ async function work() {
     commit: before => {
       syncAnchor(f);
       commit(before);
+      $('.canvasCaption').lastElementChild.textContent = '開口 ' + floorMetrics(f).hole.toFixed(2) + ' m² · 淨地坪 ' + floorMetrics(f).net.toFixed(2) + ' m²';
       $('.canvasCaption').firstElementChild.textContent = f.source + ' · ' + area(f).toFixed(2) + ' m² / ' + ping(area(f)) + ' 坪';
     }
   });

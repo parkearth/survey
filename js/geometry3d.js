@@ -1,3 +1,4 @@
+import { floorPieces, floorHoles, floorMaterials, paintFinish, isFloorHole, cutSurface, rectangle } from './floors.js';
 import { distance, deg, angle, rings, outlines } from './model.js';
 export function geometryFactory(T) {
   const material = (color, opacity = 1) => new T.MeshStandardMaterial({
@@ -7,7 +8,7 @@ export function geometryFactory(T) {
     opacity,
     depthWrite: opacity === 1
   });
-  function plank() {
+  function plank(key) {
     const c = document.createElement('canvas');
     c.width = c.height = 256;
     const g = c.getContext('2d');
@@ -25,6 +26,7 @@ export function geometryFactory(T) {
         g.stroke();
       }
     }
+    paintFinish(g, key, 0, 0, 256, 256, 1);
     const tex = new T.CanvasTexture(c);
     tex.wrapS = tex.wrapT = T.RepeatWrapping;
     tex.colorSpace = T.SRGBColorSpace;
@@ -54,18 +56,20 @@ export function geometryFactory(T) {
       dark = material('#817e72'),
       glass = material('#84b5bd', .48),
       cloth = material('#8c9c8f');
-    const floorMat = material('#ffffff');
-    floorMat.map = plank();
+    const floorMat = material((floorMaterials[f.floorMaterial] || floorMaterials.wood).color);
+    floorMat.map = plank(f.floorMaterial);
+    floorMat.color?.set?.('#ffffff');
+    floorMat.roughness = f.floorMaterial === 'marble' ? .3 : f.floorMaterial === 'tile' ? .55 : .86;
     floorMat.side = T.DoubleSide;
-    for (const v of [...outlines(f), ...rings(f, 'balcony'), ...rings(f, 'arcade')]) {
+    for (const v of floorPieces(f)) {
       const shape = new T.Shape(v.map(p => new T.Vector2(p.x / 100, -p.y / 100)));
       const geo = new T.ExtrudeGeometry(shape, {
-          depth: .045,
+          depth: (f.slabThickness ?? 4.5) / 100,
           bevelEnabled: false
         }),
         mesh = new T.Mesh(geo, floorMat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = -.045;
+      mesh.position.y = -(f.slabThickness ?? 4.5) / 100;
       group.add(mesh);
     }
     for (const w of f.walls) {
@@ -99,6 +103,20 @@ export function geometryFactory(T) {
       panel(last, len, 0, h);
     }
     for (const o of [...f.openings, ...f.furnitures, ...(f.components || [])]) {
+      if (isFloorHole(o)) continue;
+      if (o.subtype === 'slab') {
+        for (const v of cutSurface([rectangle(o)], floorHoles(f))) {
+          const shape = new T.Shape(v.map(p => new T.Vector2(p.x / 100, -p.y / 100)));
+          const mesh = new T.Mesh(new T.ExtrudeGeometry(shape, {
+            depth: o.height / 100,
+            bevelEnabled: false
+          }), floorMat);
+          mesh.rotation.x = -Math.PI / 2;
+          mesh.position.y = (o.elevation || 0) / 100;
+          group.add(mesh);
+        }
+        continue;
+      }
       const g = new T.Group();
       g.position.set(o.x / 100, (o.elevation || 0) / 100, o.y / 100);
       g.rotation.y = -deg(o.rotation);

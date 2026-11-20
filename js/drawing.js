@@ -1,3 +1,4 @@
+import { floorPieces, floorMetrics, floorMaterials, isFloorHole, paintFinish } from './floors.js';
 import { pt, bounds, deg, distance, rings, outlines, offset, area, ping, angle, turn } from './model.js';
 export const colors = {
   structural: '#1A1A1A',
@@ -73,6 +74,19 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
     for (let x = b.l - (b.b - b.t); x < b.r; x += 12) line(x, b.t, x + b.b - b.t, b.b);
     c.restore();
   }
+  const pieces = floorPieces(f);
+  if (pieces.length) {
+    c.save();
+    c.beginPath();
+    for (const p of pieces) {
+      p.forEach((v, i) => i ? c.lineTo(v.x, v.y) : c.moveTo(v.x, v.y));
+      c.closePath();
+    }
+    c.clip();
+    c.globalAlpha = .38;
+    paintFinish(c, f.floorMaterial, b.l, b.t, b.r - b.l, b.b - b.t);
+    c.restore();
+  }
   for (const w of f.walls) {
     c.strokeStyle = colors[w.type];
     c.lineWidth = w.thickness;
@@ -92,7 +106,26 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
     c.strokeStyle = '#383d36';
     c.fillStyle = '#e6e2d7';
     c.fillRect(x, y, w, d);
-    if (o.type === 'door') {
+    if (isFloorHole(o)) {
+      c.fillStyle = '#faf8f4';
+      c.fillRect(x, y, w, d);
+      c.strokeStyle = '#947f70';
+      c.setLineDash([9, 5]);
+      c.strokeRect(x, y, w, d);
+      c.setLineDash([]);
+      line(x, y, -x, -y);
+      line(-x, y, x, -y);
+      if (state.labels !== false) {
+        c.font = '12px sans-serif';
+        c.textAlign = 'center';
+        const label = o.label + ' ' + Math.round(w) + '×' + Math.round(d);
+        const bw = c.measureText(label).width + 10;
+        c.fillStyle = '#faf8f4';
+        c.fillRect(-bw / 2, -9, bw, 18);
+        c.fillStyle = '#806e60';
+        text(label, 0, 4);
+      }
+    } else if (o.type === 'door') {
       const s = o.swingDirection || 1;
       c.fillStyle = '#faf8f4';
       c.fillRect(x, y - 1, w, d + 2);
@@ -248,7 +281,7 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
   c.strokeStyle = '#c6ae80';
   c.lineWidth = 1;
   c.beginPath();
-  c.roundRect(9, 9, Math.min(W - 18, 270), 49, 8);
+  c.roundRect(9, 9, Math.min(W - 18, 310), 65, 8);
   c.fill();
   c.stroke();
   c.fillStyle = '#263c32';
@@ -256,6 +289,9 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
   text(f.label + '  ' + project.name.slice(0, 20), 19, 29);
   c.font = '11px sans-serif';
   text((area(f) ? ping(area(f)) + ' 坪  /  ' + area(f).toFixed(2) + ' m²' : '待閉合外牆') + '   ·   ' + f.usage.slice(0, 15), 19, 46);
+  const metrics = floorMetrics(f);
+  c.font = '10px sans-serif';
+  text((floorMaterials[f.floorMaterial] || floorMaterials.wood).label + ' · 開口 ' + metrics.hole.toFixed(2) + ' m² · 淨地坪 ' + metrics.net.toFixed(2) + ' m²', 19, 62);
   return {
     b,
     k,

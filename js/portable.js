@@ -121,8 +121,9 @@ function collect(n, parents = [], out = []) {
   if (n.geo) out.push({
     verts: n.geo.v.map(v => chain.reduce(transform, v)),
     faces: n.geo.faces,
-    color: n.mat.map ? '#c9b799' : n.mat.color,
-    alpha: n.mat.opacity
+    color: n.mat.color,
+    alpha: n.mat.opacity,
+    edges: !n.mat.map
   });
   for (const child of n.children) collect(child, chain, out);
   return out;
@@ -345,6 +346,7 @@ export function viewer(host, p, idx) {
           pts,
           color: m.color,
           alpha: m.alpha,
+          edges: m.edges,
           order: pts.reduce((s, p) => s + p[2], 0) / pts.length
         });
       }
@@ -370,7 +372,7 @@ export function viewer(host, p, idx) {
       g.fill();
       g.strokeStyle = '#665f50';
       g.globalAlpha = .35 * f.alpha;
-      g.stroke();
+      if (f.edges) g.stroke();
     }
     g.globalAlpha = 1;
     if (mode === 'explode') {
@@ -446,3 +448,4 @@ export function viewer(host, p, idx) {
     }
   };
 }
+

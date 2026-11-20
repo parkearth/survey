@@ -1,3 +1,4 @@
+import { floorPieces, floorMetrics, floorMaterials, isFloorHole } from './floors.js';
 import { constructionTypes } from './catalog.js';
 import { draw, dimensions } from './drawing.js';
 import { pt, turn, area, ping, distance } from './model.js';
@@ -91,9 +92,16 @@ export class DXFGenerator {
         pair(10, coord(p.x), 20, coord(-p.y));
       }
     };
-    pair(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1015', 9, '$INSUNITS', 70, 5, 0, 'ENDSEC', 0, 'SECTION', 2, 'TABLES', 0, 'TABLE', 2, 'LAYER', 5, '2', 100, 'AcDbSymbolTable', 70, 8);
-    for (const [l, c] of [['0', 7], ['WALL', 7], ['DOOR', 30], ['WINDOW', 5], ['FURNITURE', 8], ['DIM', 2], ['STRUCTURE', 8], ['EQUIPMENT', 4]]) pair(0, 'LAYER', 5, (handle++).toString(16), 330, '2', 100, 'AcDbSymbolTableRecord', 100, 'AcDbLayerTableRecord', 2, l, 70, 0, 62, c, 6, 'CONTINUOUS');
+    pair(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1015', 9, '$INSUNITS', 70, 5, 0, 'ENDSEC', 0, 'SECTION', 2, 'TABLES', 0, 'TABLE', 2, 'LAYER', 5, '2', 100, 'AcDbSymbolTable', 70, 10);
+    for (const [l, c] of [['0', 7], ['WALL', 7], ['DOOR', 30], ['WINDOW', 5], ['FURNITURE', 8], ['DIM', 2], ['STRUCTURE', 8], ['EQUIPMENT', 4], ['FLOOR', 8], ['FLOOR_OPENING', 30]]) pair(0, 'LAYER', 5, (handle++).toString(16), 330, '2', 100, 'AcDbSymbolTableRecord', 100, 'AcDbLayerTableRecord', 2, l, 70, 0, 62, c, 6, 'CONTINUOUS');
     pair(0, 'ENDTAB', 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES');
+    for (const p of floorPieces(f)) {
+      entity('LWPOLYLINE', 'FLOOR', 'AcDbPolyline');
+      pair(90, p.length, 70, 1);
+      for (const v of p) pair(10, coord(v.x), 20, coord(-v.y));
+    }
+    const metrics = floorMetrics(f);
+    label('FLOOR', f.anchorPoint, (floorMaterials[f.floorMaterial] || floorMaterials.wood).label + ' / net ' + metrics.net.toFixed(2) + ' m2 / opening ' + metrics.hole.toFixed(2) + ' m2');
     for (const w of f.walls) {
       line('WALL', w.start, w.end);
       rect('WALL', {
@@ -105,7 +113,7 @@ export class DXFGenerator {
       });
     }
     for (const o of [...f.furnitures, ...f.openings, ...(f.components || [])]) {
-      const l = o.type === 'door' ? 'DOOR' : o.type?.includes('window') ? 'WINDOW' : !o.type && !o.category ? ['column', 'beam', 'slab', 'roof', 'canopy', 'parapet', 'railing', 'ramp'].includes(o.subtype) ? 'STRUCTURE' : 'EQUIPMENT' : 'FURNITURE';
+      const l = isFloorHole(o) ? 'FLOOR_OPENING' : o.type === 'door' ? 'DOOR' : o.type?.includes('window') ? 'WINDOW' : !o.type && !o.category ? ['column', 'beam', 'slab', 'roof', 'canopy', 'parapet', 'railing', 'ramp'].includes(o.subtype) ? 'STRUCTURE' : 'EQUIPMENT' : 'FURNITURE';
       rect(l, o);
       if (l === 'DOOR' && !o.passage && !['sliding_door', 'roller_door'].includes(o.subtype)) {
         const radius = o.subtype === 'double_door' ? o.width / 2 : o.width;
@@ -215,13 +223,15 @@ export async function report(p, brand) {
     g.fillText(f.label + '  ' + f.usage, 60, 270);
     g.font = '24px sans-serif';
     g.fillText('建模時間  ' + new Date(f.scannedAt || p.createdAt).toLocaleString('zh-TW') + '     來源  ' + f.source, 60, 332);
-    g.fillText('構造  ' + (constructionTypes[f.construction]?.label || f.construction || '未分類') + '     樓高 ' + f.ceilingHeight + ' cm', 60, 375);
+    g.fillText('構造  ' + (constructionTypes[f.construction]?.label || f.construction || '未分類') + '     樓高 ' + f.ceilingHeight + ' cm · ' + (floorMaterials[f.floorMaterial] || floorMaterials.wood).label, 60, 375, 1120);
     const plan = document.createElement('canvas');
     draw(plan, f, p, {
       width: 750,
       height: 760
     }, 2);
-    g.drawImage(plan, 48, 400, 1144, 1160);
+    g.drawImage(plan, 48, 410, 1144, 1120);
+    const metrics = floorMetrics(f);
+    g.fillText('外框 ' + metrics.gross.toFixed(2) + ' m² · 開口 ' + metrics.hole.toFixed(2) + ' m² · 淨地坪 ' + metrics.net.toFixed(2) + ' m²', 60, 1588, 1120);
     g.font = '24px sans-serif';
     let x = 60;
     for (const [t, color] of [['結構牆', '#1a1a1a'], ['門扇', '#a77862'], ['窗框', '#718b95'], ['陽台', '#78947c'], ['垂直動線', '#b08838']]) {

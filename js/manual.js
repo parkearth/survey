@@ -16,6 +16,8 @@ export function createFloor(values, index) {
     label: values.label || index + 'F',
     usage: values.usage || '住宅',
     construction: values.construction || 'RC',
+    floorMaterial: values.floorMaterial || 'wood',
+    slabThickness: 15,
     wallThickness: thickness,
     ceilingHeight: Number(values.height),
     rotationAngle: 0,
@@ -40,6 +42,10 @@ export function createFloor(values, index) {
 }
 export function addObject(f, key, values) {
   const spec = catalog[key];
+  if (spec.kind === 'finish') {
+    f.floorMaterial = spec.material;
+    return null;
+  }
   const o = {
     id: id(),
     label: values.label || spec.label,
@@ -100,6 +106,8 @@ export function upgrade(p) {
   // Defaults are supplied in memory. Old projects retain their storage key and object identifiers.
   for (const f of p.floors) {
     f.components ||= [];
+    f.floorMaterial ||= 'wood';
+    f.slabThickness ??= 4.5;
     f.construction ||= 'RC';
     f.source ||= '既有資料';
   }
