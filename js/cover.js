@@ -28,11 +28,11 @@ export function cover(c) {
     base = ['#647d6b', '#476453', '#a1b39a'],
     floor = ['#85917b', '#667b66', '#c8c4a8'],
     wood = ['#9e9172', '#766c55', '#d2c29e'];
-  g.fillStyle = '#233c31';
+  g.fillStyle = '#cdd6c7';
   g.fillRect(0, 0, w, h);
   for (let i = -280; i <= 280; i += 18) {
-    path([[i, -270, 0], [i, 270, 0]], null, '#314b3e');
-    path([[-270, i, 0], [270, i, 0]], null, '#314b3e');
+    path([[i, -270, 0], [i, 270, 0]], null, '#bdc9b8');
+    path([[-270, i, 0], [270, i, 0]], null, '#bdc9b8');
   }
   for (const z of [0, 70]) {
     block(-86, -43, z, 158, 85, 5, floor);
@@ -48,10 +48,10 @@ export function cover(c) {
   }
   for (const [x, y] of [[-86, 42], [72, 42], [72, -43]]) {
     g.setLineDash([3, 4]);
-    path([[x, y, 6], [x, y, 69]], null, '#d0bd8b');
+    path([[x, y, 6], [x, y, 69]], null, '#9a8c71');
     g.setLineDash([]);
   }
-  g.fillStyle = '#d2c8ab';
+  g.fillStyle = '#596c57';
   g.font = '10px monospace';
   g.fillText('2F', 367, 82);
   g.fillText('1F', 367, 137);

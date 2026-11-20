@@ -17,7 +17,7 @@ export function editor(canvas, f, p, s, api) {
     },
     world = v => view.world(v.x, v.y);
   function hit(v) {
-    for (const o of [...f.openings, ...(s.furniture ? f.furnitures : [])].reverse()) {
+    for (const o of [...f.openings, ...(s.furniture ? f.furnitures : []), ...(f.components || [])].reverse()) {
       const u = turn(v, -o.rotation, o);
       if (Math.abs(u.x - o.x) <= Math.max(8 / view.k, o.width / 2) && Math.abs(u.y - o.y) <= Math.max(8 / view.k, o.depth / 2)) return o;
     }
@@ -152,6 +152,7 @@ export function editor(canvas, f, p, s, api) {
   };
   return {
     paint,
+    center(){return view.world(canvas.clientWidth/2,canvas.clientHeight/2)},
     destroy() {
       ro.disconnect();
       canvas.onpointerdown = canvas.onpointermove = canvas.onpointerup = canvas.onpointercancel = canvas.onwheel = null;

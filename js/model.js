@@ -119,7 +119,7 @@ export function rotate(f, a) {
     w.start = turn(w.start, a, f.anchorPoint);
     w.end = turn(w.end, a, f.anchorPoint);
   }
-  for (const o of [...f.openings, ...f.furnitures]) Object.assign(o, turn(o, a, f.anchorPoint), {
+  for (const o of [...f.openings, ...f.furnitures, ...(f.components || [])]) Object.assign(o, turn(o, a, f.anchorPoint), {
     rotation: wrap(o.rotation + a)
   });
   f.rotationAngle = wrap(f.rotationAngle + a);
@@ -363,7 +363,8 @@ export function annexes(f) {
     return {
       regionId,
       type: walls[0].type,
-      label: walls[0].type === 'balcony' ? '陽台／露台' : '騎樓／車庫',
+      label: walls[0].label || (walls[0].type === 'balcony' ? '陽台／露台' : '騎樓／車庫'),
+      height:walls[0].height || (walls[0].type === 'balcony'?100:f.ceilingHeight),
       x: (a.x + c.x) / 2,
       y: (a.y + c.y) / 2,
       width: distance(a, b),
@@ -375,6 +376,8 @@ export function annexes(f) {
 export function reshapeAnnex(f, o) {
   const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => turn(pt(o.x + i * o.width / 2, o.y + j * o.depth / 2), o.rotation, o));
   f.walls.filter(w => w.regionId === o.regionId).forEach((w, i) => {
+    w.height=o.height;
+    w.label=o.label;
     w.start = {
       ...corners[i]
     };

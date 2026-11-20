@@ -2,11 +2,11 @@ import { pt, bounds, deg, distance, rings, outlines, offset, area, ping, angle, 
 export const colors = {
   structural: '#1A1A1A',
   partition: '#514e48',
-  balcony: '#3B8A5A',
+  balcony: '#78947c',
   arcade: '#938267',
-  door: '#E68A3E',
-  window: '#2B7A9B',
-  stairs: '#b08838'
+  door: '#a77862',
+  window: '#718b95',
+  stairs: '#a18c63'
 };
 export function dimensions(f) {
   const r = rings(f),
@@ -35,7 +35,7 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
   const c = canvas.getContext('2d');
   c.scale(resolution, resolution);
   const pts = f.walls.flatMap(w => [w.start, w.end]);
-  for (const o of [...f.furnitures, ...f.openings]) for (const i of [-1, 1]) for (const j of [-1, 1]) pts.push(turn(pt(o.x + i * o.width / 2, o.y + j * o.depth / 2), o.rotation, o));
+  for (const o of [...f.furnitures, ...f.openings, ...(f.components || [])]) for (const i of [-1, 1]) for (const j of [-1, 1]) pts.push(turn(pt(o.x + i * o.width / 2, o.y + j * o.depth / 2), o.rotation, o));
   const b = state.lockBounds || bounds(pts.length ? pts : [pt(0, 0), pt(300, 300)]),
     k = Math.min((W - 24) / (b.r - b.l + 208), (H - 100) / (b.b - b.t + 208)) * (state.zoom || 1),
     ox = W / 2 - (b.r + b.l) * k / 2 + (state.pan?.x || 0),
@@ -80,7 +80,7 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
     line(w.start.x, w.start.y, w.end.x, w.end.y);
   }
   c.lineCap = 'butt';
-  for (const o of [...(state.furniture === false ? [] : f.furnitures), ...f.openings]) {
+  for (const o of [...(state.furniture === false ? [] : f.furnitures), ...f.openings, ...(f.components || [])]) {
     c.save();
     c.translate(o.x, o.y);
     c.rotate(deg(o.rotation));
@@ -100,8 +100,38 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
         c.restore();
         continue;
       }
+      if (['sliding_door', 'roller_door'].includes(o.subtype)) {
+        c.strokeStyle = colors.door;
+        c.strokeRect(x, y, w, d);
+        line(x, 0, -x, 0);
+        if (o.subtype === 'roller_door') for (let i = x + 12; i < -x; i += 12) line(i, y, i, -y);
+        c.restore();
+        continue;
+      }
       c.strokeStyle = colors.door;
-      c.fillStyle = '#e68a3e24';
+      if (o.subtype === 'double_door') {
+        for (const side of [-1, 1]) {
+          const hinge = side * w / 2,
+            r = w / 2,
+            start = side < 0 ? 0 : Math.PI,
+            end = s * Math.PI / 2;
+          c.fillStyle = '#a7786224';
+          c.beginPath();
+          c.moveTo(hinge, 0);
+          c.arc(hinge, 0, r, start, end, side < 0 ? s < 0 : s > 0);
+          c.closePath();
+          c.fill();
+          c.setLineDash([6, 4]);
+          c.beginPath();
+          c.arc(hinge, 0, r, start, end, side < 0 ? s < 0 : s > 0);
+          c.stroke();
+          c.setLineDash([]);
+          line(hinge, 0, hinge, s * r);
+        }
+        c.restore();
+        continue;
+      }
+      c.fillStyle = '#a7786224';
       c.beginPath();
       c.moveTo(x, 0);
       c.arc(x, 0, w, 0, s * Math.PI / 2, s < 0);
@@ -123,8 +153,31 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
       c.strokeStyle = o.type ? colors.stairs : '#56584d';
       c.strokeRect(x, y, w, d);
       c.strokeRect(x + 3, y + 3, w - 6, d - 6);
-      if (o.type === 'stairs') {
+      if (o.subtype === 'column' || o.subtype === 'pipe_shaft') {
+        line(x, y, -x, -y);
+        line(-x, y, x, -y);
+      } else if (['beam', 'slab', 'roof', 'canopy'].includes(o.subtype)) {
+        c.setLineDash([7, 5]);
+        c.strokeRect(x, y, w, d);
+        c.setLineDash([]);
+      } else if (o.subtype === 'railing') {
+        for (let i = x + 15; i < -x; i += 15) line(i, y - 3, i, -y + 3);
+      } else if (['sink', 'toilet', 'bathtub', 'water_tank'].includes(o.subtype)) {
+        c.beginPath();
+        c.ellipse(0, 0, w * .32, d * .32, 0, 0, Math.PI * 2);
+        c.stroke();
+      } else if (o.subtype === 'shower') {
+        line(x, y, -x, -y);
+        c.beginPath();
+        c.arc(0, 0, 7, 0, Math.PI * 2);
+        c.stroke();
+      } else if (o.subtype === 'ramp') {
+        line(0, -y, 0, y);
+        line(0, y, -w * .15, y + d * .2);
+        line(0, y, w * .15, y + d * .2);
+      } else if (o.type === 'stairs') {
         for (let a = y + 18; a < d / 2; a += 18) line(x, a, w / 2, a);
+        if (o.subtype === 'stairs_u') line(0, y, 0, -y);
       } else if (o.type === 'elevator') {
         line(x, y, -x, -y);
         line(-x, y, x, -y);
@@ -210,3 +263,4 @@ export function draw(canvas, f, project, state = {}, resolution = devicePixelRat
     center: pt((b.l + b.r) / 2, (b.t + b.b) / 2)
   };
 }
+

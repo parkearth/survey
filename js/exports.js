@@ -1,7 +1,8 @@
+import { constructionTypes } from './catalog.js';
 import { draw, dimensions } from './drawing.js';
 import { pt, turn, area, ping, distance } from './model.js';
 export function saveFile(data, name, type) {
-  name = name.replace(/[\\/:*?"<>|]/g,'-');
+  name = name.replace(/[\\/:*?"<>|]/g, '-');
   const blob = data instanceof Blob ? data : new Blob([data], {
     type
   });
@@ -90,8 +91,8 @@ export class DXFGenerator {
         pair(10, coord(p.x), 20, coord(-p.y));
       }
     };
-    pair(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1015', 9, '$INSUNITS', 70, 5, 0, 'ENDSEC', 0, 'SECTION', 2, 'TABLES', 0, 'TABLE', 2, 'LAYER', 5, '2', 100, 'AcDbSymbolTable', 70, 6);
-    for (const [l, c] of [['0', 7], ['WALL', 7], ['DOOR', 30], ['WINDOW', 5], ['FURNITURE', 8], ['DIM', 2]]) pair(0, 'LAYER', 5, (handle++).toString(16), 330, '2', 100, 'AcDbSymbolTableRecord', 100, 'AcDbLayerTableRecord', 2, l, 70, 0, 62, c, 6, 'CONTINUOUS');
+    pair(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1015', 9, '$INSUNITS', 70, 5, 0, 'ENDSEC', 0, 'SECTION', 2, 'TABLES', 0, 'TABLE', 2, 'LAYER', 5, '2', 100, 'AcDbSymbolTable', 70, 8);
+    for (const [l, c] of [['0', 7], ['WALL', 7], ['DOOR', 30], ['WINDOW', 5], ['FURNITURE', 8], ['DIM', 2], ['STRUCTURE', 8], ['EQUIPMENT', 4]]) pair(0, 'LAYER', 5, (handle++).toString(16), 330, '2', 100, 'AcDbSymbolTableRecord', 100, 'AcDbLayerTableRecord', 2, l, 70, 0, 62, c, 6, 'CONTINUOUS');
     pair(0, 'ENDTAB', 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES');
     for (const w of f.walls) {
       line('WALL', w.start, w.end);
@@ -103,16 +104,20 @@ export class DXFGenerator {
         rotation: Math.atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180 / Math.PI
       });
     }
-    for (const o of [...f.furnitures, ...f.openings]) {
-      const l = o.type === 'door' ? 'DOOR' : o.type?.includes('window') ? 'WINDOW' : 'FURNITURE';
+    for (const o of [...f.furnitures, ...f.openings, ...(f.components || [])]) {
+      const l = o.type === 'door' ? 'DOOR' : o.type?.includes('window') ? 'WINDOW' : !o.type && !o.category ? ['column', 'beam', 'slab', 'roof', 'canopy', 'parapet', 'railing', 'ramp'].includes(o.subtype) ? 'STRUCTURE' : 'EQUIPMENT' : 'FURNITURE';
       rect(l, o);
-      if (l === 'DOOR' && !o.passage) {
-        const h = turn(pt(o.x - o.width / 2, o.y), o.rotation, o),
-          a = -o.rotation,
-          b = a - 90 * (o.swingDirection || 1);
-        entity('ARC', l, 'AcDbCircle');
-        pair(10, coord(h.x), 20, coord(-h.y), 30, 0, 40, o.width, 100, 'AcDbArc', 50, (Math.min(a, b) + 720) % 360, 51, (Math.max(a, b) + 720) % 360);
-        line(l, h, turn(pt(h.x, h.y + o.width * (o.swingDirection || 1)), o.rotation, h));
+      if (l === 'DOOR' && !o.passage && !['sliding_door', 'roller_door'].includes(o.subtype)) {
+        const radius = o.subtype === 'double_door' ? o.width / 2 : o.width;
+        for (const side of o.subtype === 'double_door' ? [-1, 1] : [-1]) {
+          const h = turn(pt(o.x + side * o.width / 2, o.y), o.rotation, o);
+          const a = -o.rotation + (side === 1 ? 180 : 0),
+            b = -o.rotation - 90 * (o.swingDirection || 1);
+          const start = (side < 0 ? (o.swingDirection || 1) > 0 : (o.swingDirection || 1) < 0) ? b : a;
+          entity('ARC', l, 'AcDbCircle');
+          pair(10, coord(h.x), 20, coord(-h.y), 30, 0, 40, radius, 100, 'AcDbArc', 50, (start + 720) % 360, 51, (start + 90 + 720) % 360);
+          line(l, h, turn(pt(h.x, h.y + radius * (o.swingDirection || 1)), o.rotation, h));
+        }
       } else label(l, o, o.label);
     }
     for (const [a, b, v] of dimensions(f)) {
@@ -171,9 +176,9 @@ export async function report(p, brand) {
     const g = c.getContext('2d');
     g.fillStyle = '#faf8f4';
     g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = '#19352b';
+    g.fillStyle = '#647969';
     g.fillRect(0, 0, 1240, 180);
-    g.fillStyle = '#d8b986';
+    g.fillStyle = '#e9e5d7';
     g.font = '25px sans-serif';
     g.fillText(brand, 60, 63, 1120);
     g.fillStyle = '#ffffff';
@@ -209,7 +214,8 @@ export async function report(p, brand) {
     g.font = 'bold 36px sans-serif';
     g.fillText(f.label + '  ' + f.usage, 60, 270);
     g.font = '24px sans-serif';
-    g.fillText('掃描時間  ' + new Date(f.scannedAt || p.createdAt).toLocaleString('zh-TW') + '     來源  ' + f.source, 60, 332);
+    g.fillText('建模時間  ' + new Date(f.scannedAt || p.createdAt).toLocaleString('zh-TW') + '     來源  ' + f.source, 60, 332);
+    g.fillText('構造  ' + (constructionTypes[f.construction]?.label || f.construction || '未分類') + '     樓高 ' + f.ceilingHeight + ' cm', 60, 375);
     const plan = document.createElement('canvas');
     draw(plan, f, p, {
       width: 750,
@@ -218,7 +224,7 @@ export async function report(p, brand) {
     g.drawImage(plan, 48, 400, 1144, 1160);
     g.font = '24px sans-serif';
     let x = 60;
-    for (const [t, color] of [['結構牆', '#1a1a1a'], ['門扇', '#e68a3e'], ['窗框', '#2b7a9b'], ['陽台', '#3b8a5a'], ['垂直動線', '#b08838']]) {
+    for (const [t, color] of [['結構牆', '#1a1a1a'], ['門扇', '#a77862'], ['窗框', '#718b95'], ['陽台', '#78947c'], ['垂直動線', '#b08838']]) {
       g.fillStyle = color;
       g.fillRect(x, 1630, 23, 23);
       g.fillStyle = '#23392d';
@@ -229,3 +235,4 @@ export async function report(p, brand) {
   }
   saveFile(rasterPDF(pages), p.name + '.pdf', 'application/pdf');
 }
+
