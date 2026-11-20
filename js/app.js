@@ -155,9 +155,9 @@ function open(p) {
 function home() {
   destroy();
   app.className = 'home';
-  $('#brand').textContent = brand;
+  $('#brandText').textContent = brand;
   const all = db.list();
-  app.innerHTML = `<header class="mast"><span class="mark">⌑</span><div><small>SURVEYBRIDGE · v2.1</small><strong>${esc(brand.split('｜')[0])}</strong></div>${button('brand', '品牌設定', 'quiet')}</header>
+  app.innerHTML = `<header class="mast"><small>SURVEYBRIDGE · v2.2</small>${button('brand', '品牌設定', 'quiet')}</header>
     <section class="intro"><div><span class="eyebrow">空間建模工作站</span><h1>從尺寸開始，<br>建立建物全貌。</h1><p>記錄樓層與構造，完成可編輯的平面與立體模型。</p></div><div class="plate"><canvas id="cover" aria-label="多樓層建築示意"></canvas></div></section>
     <div class="entryGrid">
       ${button('manual', '<span class="entryIcon">⌑</span><span><strong>手動數據建模</strong><small>輸入尺寸 · 選擇構造 · 加入物件</small></span><span class="entryArrow">↗</span>', 'entry primary')}
